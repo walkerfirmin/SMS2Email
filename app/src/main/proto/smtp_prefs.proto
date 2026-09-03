@@ -18,4 +18,7 @@ message SmtpPreferences {
   string from_email = 5;
   string to_email = 6;
   SmtpEncryptionMode encryption_mode = 7;
+  // User supplied phone number of each SIM, keyed by SIM slot index. Used when the platform does
+  // not report the number of the SIM that received an SMS.
+  map<int32, string> sim_number_overrides = 8;
 }

@@ -18,11 +18,15 @@ import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeMessage;
 
 public class MailSender {
-  public void send(Context context, String subject, String content) {
-    new Thread(() -> sendSync(context, subject, content)).start();
+  public void send(Context context, String label, String content) {
+    send(context, label, "SMS from " + label, content);
   }
 
-  private void sendSync(Context context, String subject, String content) {
+  public void send(Context context, String fromDisplayName, String subject, String content) {
+    new Thread(() -> sendSync(context, fromDisplayName, subject, content)).start();
+  }
+
+  private void sendSync(Context context, String fromDisplayName, String subject, String content) {
     final SmtpConfig config = PreferencesManager.getConfigBlocking(context);
     final int smtpPort = config.getSmtpPort();
     final Properties prop = new Properties();
@@ -60,9 +64,9 @@ public class MailSender {
                 }
               });
       Message message = new MimeMessage(session);
-      message.setFrom(InternetAddress.parse(subject + " <" + config.getFromEmail() + ">")[0]);
+      message.setFrom(new InternetAddress(config.getFromEmail(), fromDisplayName));
       message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(config.getToEmail()));
-      message.setSubject("SMS from " + subject);
+      message.setSubject(subject);
       message.setText(content);
       Transport.send(message);
 
@@ -73,8 +77,9 @@ public class MailSender {
 
       NotificationCompat.Builder builder =
           new NotificationCompat.Builder(context, NotificationHelper.CHANNEL_ID)
-              .setContentTitle("Transferred SMS from " + subject)
+              .setContentTitle("Transferred " + subject)
               .setContentText(content)
+              .setStyle(new NotificationCompat.BigTextStyle().bigText(content))
               .setSmallIcon(android.R.drawable.ic_dialog_email);
 
       notificationManager.notify(2, builder.build());

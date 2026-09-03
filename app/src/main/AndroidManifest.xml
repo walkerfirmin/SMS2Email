@@ -9,6 +9,10 @@
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <!--Required to post notifications-->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!--Required to identify which SIM received an SMS-->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!--Required to read the phone number of the SIM that received an SMS-->
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
     <!--Required to post SMTP requests-->
     <uses-permission android:name="android.permission.INTERNET" />
     <application

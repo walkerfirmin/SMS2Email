@@ -14,14 +14,53 @@ public class SmsReceiver extends BroadcastReceiver {
   public void onReceive(Context context, Intent intent) {
     if (Objects.equals(intent.getAction(), Telephony.Sms.Intents.SMS_RECEIVED_ACTION)) {
       SmsMessage[] messages = Telephony.Sms.Intents.getMessagesFromIntent(intent);
-      String sender = messages[0].getOriginatingAddress();
+      if (messages == null || messages.length == 0) {
+        return;
+      }
+
       StringBuilder bodyText = new StringBuilder();
       for (SmsMessage message : messages) {
         bodyText.append(message.getMessageBody());
       }
-      String message = bodyText.toString();
 
-      mailSender.send(context, sender, message);
+      SmsMetadata metadata = describe(messages, bodyText.toString());
+      SimInfo simInfo =
+          SimInfoResolver.resolve(
+              context,
+              intent,
+              PreferencesManager.getConfigBlocking(context).getSimNumberOverrides());
+      metadata.setSim(simInfo);
+
+      mailSender.send(
+          context,
+          ReceivedSmsFormatter.formatSender(metadata),
+          ReceivedSmsFormatter.formatSubject(metadata),
+          ReceivedSmsFormatter.formatBody(metadata));
     }
+  }
+
+  private SmsMetadata describe(SmsMessage[] messages, String body) {
+    SmsMessage first = messages[0];
+    SmsMetadata metadata =
+        new SmsMetadata()
+            .setSender(sender(first))
+            .setBody(body)
+            .setPartCount(messages.length)
+            .setSentAtMillis(first.getTimestampMillis())
+            .setReceivedAtMillis(System.currentTimeMillis())
+            .setServiceCenterAddress(first.getServiceCenterAddress())
+            .setPseudoSubject(first.getPseudoSubject());
+    if (first.isEmail()) {
+      metadata.setEmailGatewaySender(first.getEmailFrom());
+    }
+    return metadata;
+  }
+
+  private String sender(SmsMessage message) {
+    String sender = message.getOriginatingAddress();
+    if (sender == null || sender.trim().isEmpty()) {
+      sender = message.getDisplayOriginatingAddress();
+    }
+    return sender;
   }
 }

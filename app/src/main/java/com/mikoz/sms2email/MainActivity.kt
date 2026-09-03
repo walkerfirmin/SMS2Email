@@ -45,7 +45,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -67,6 +69,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
   private val smsPermissionGrantedFlow = MutableStateFlow(false)
   private val notificationPermissionGrantedFlow = MutableStateFlow(false)
+  private val phonePermissionGrantedFlow = MutableStateFlow(false)
   private val requestPermissionLauncher =
       registerForActivityResult(
           ActivityResultContracts.RequestPermission(),
@@ -87,6 +90,17 @@ class MainActivity : ComponentActivity() {
         notificationPermissionGrantedFlow.value = isGranted
       }
 
+  private val requestPhonePermissionsLauncher =
+      registerForActivityResult(
+          ActivityResultContracts.RequestMultiplePermissions(),
+      ) {
+        val isGranted = isPhonePermissionGranted()
+        if (!isGranted) {
+          Toast.makeText(this, "Phone permission denied", Toast.LENGTH_SHORT).show()
+        }
+        phonePermissionGrantedFlow.value = isGranted
+      }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     // window.setBackgroundDrawableResource(R.drawable.background)
@@ -98,6 +112,9 @@ class MainActivity : ComponentActivity() {
     notificationPermissionGrantedFlow.value = isNotificationPermissionGranted()
     val initialNotificationPermissionGranted = notificationPermissionGrantedFlow.value
 
+    phonePermissionGrantedFlow.value = isPhonePermissionGranted()
+    val initialPhonePermissionGranted = phonePermissionGrantedFlow.value
+
     setContent {
       SMS2EmailTheme {
         val isDark = isSystemInDarkTheme()
@@ -107,6 +124,8 @@ class MainActivity : ComponentActivity() {
             notificationPermissionGrantedFlow.collectAsState(
                 initial = initialNotificationPermissionGranted,
             )
+        val isPhonePermissionGranted by
+            phonePermissionGrantedFlow.collectAsState(initial = initialPhonePermissionGranted)
         Box(
             modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
         ) {
@@ -138,6 +157,10 @@ class MainActivity : ComponentActivity() {
                       )
                     }
                   },
+                  isPhonePermissionGranted = isPhonePermissionGranted,
+                  onRequestPhonePermission = {
+                    requestPhonePermissionsLauncher.launch(phonePermissions())
+                  },
                   modifier = Modifier.padding(innerPadding),
               )
             }
@@ -160,6 +183,18 @@ class MainActivity : ComponentActivity() {
         Manifest.permission.POST_NOTIFICATIONS,
     ) == PackageManager.PERMISSION_GRANTED
   }
+
+  private fun isPhonePermissionGranted(): Boolean =
+      phonePermissions().all {
+        ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+      }
+
+  private fun phonePermissions(): Array<String> =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        arrayOf(Manifest.permission.READ_PHONE_STATE, Manifest.permission.READ_PHONE_NUMBERS)
+      } else {
+        arrayOf(Manifest.permission.READ_PHONE_STATE)
+      }
 }
 
 @Composable
@@ -170,6 +205,8 @@ fun MailPreferencesScreen(
     onRequestPermission: () -> Unit = {},
     isNotificationPermissionGranted: Boolean,
     onRequestNotificationPermission: () -> Unit = {},
+    isPhonePermissionGranted: Boolean,
+    onRequestPhonePermission: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
 
@@ -317,6 +354,62 @@ fun MailPreferencesScreen(
           }
         }
       }
+
+      Card(
+          modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+          colors =
+              CardDefaults.cardColors(
+                  containerColor =
+                      if (isPhonePermissionGranted) {
+                        MaterialTheme.colorScheme.primaryContainer
+                      } else {
+                        MaterialTheme.colorScheme.errorContainer
+                      },
+              ),
+          elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+          shape = MaterialTheme.shapes.medium,
+      ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+          Text(
+              text =
+                  if (isPhonePermissionGranted) "✓ Phone Permission: Granted"
+                  else "✗ Phone Permission: Not Granted",
+              style = MaterialTheme.typography.bodyLarge,
+              color =
+                  if (isPhonePermissionGranted) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                  } else {
+                    MaterialTheme.colorScheme.onErrorContainer
+                  },
+          )
+          Text(
+              text = "Needed to detect which SIM and number received an SMS.",
+              style = MaterialTheme.typography.bodySmall,
+              color =
+                  if (isPhonePermissionGranted) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                  } else {
+                    MaterialTheme.colorScheme.onErrorContainer
+                  },
+          )
+
+          if (!isPhonePermissionGranted) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = { onRequestPhonePermission() },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+              Text("Request Phone Permission")
+            }
+          }
+        }
+      }
+
+      ReceivingNumbersSection(
+          context = context,
+          isPhonePermissionGranted = isPhonePermissionGranted,
+          simNumberOverrides = config.simNumberOverrides,
+      )
 
       Text(
           text = "SMTP Preferences",
@@ -524,6 +617,88 @@ fun MailPreferencesScreen(
       }
     }
   }
+}
+
+@Composable
+private fun ReceivingNumbersSection(
+    context: Context,
+    isPhonePermissionGranted: Boolean,
+    simNumberOverrides: Map<Int, String>,
+) {
+  val sims = remember(isPhonePermissionGranted) { SimInfoResolver.listActiveSims(context) }
+
+  Text(
+      text = "Receiving Numbers (SIM Cards)",
+      style = MaterialTheme.typography.titleLarge,
+      color = MaterialTheme.colorScheme.onBackground,
+      modifier = Modifier.padding(bottom = 4.dp),
+  )
+  Text(
+      text =
+          "The receiving number is shown above the message in every forwarded email. Enter a number here if your carrier does not report it.",
+      style = MaterialTheme.typography.bodySmall,
+      color = MaterialTheme.colorScheme.onBackground,
+      modifier = Modifier.padding(bottom = 12.dp),
+  )
+
+  if (sims.isEmpty()) {
+    Text(
+        text =
+            if (isPhonePermissionGranted) "No active SIM cards detected."
+            else "Grant the phone permission above to list your SIM cards.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error,
+        modifier = Modifier.padding(bottom = 16.dp),
+    )
+    return
+  }
+
+  sims.forEach { sim ->
+    key(sim.subscriptionId, sim.slotIndex) {
+      val slotIndex = sim.slotIndex
+      val simTitle =
+          listOfNotNull(
+                  "SIM ${sim.slotNumber}".takeIf { sim.slotNumber > 0 },
+                  sim.carrierName?.takeIf { it.isNotBlank() },
+                  sim.displayName?.takeIf { it.isNotBlank() && it != sim.carrierName },
+              )
+              .joinToString(" - ")
+              .ifBlank { "SIM (subscription ${sim.subscriptionId})" }
+
+      Text(
+          text = simTitle,
+          style = MaterialTheme.typography.bodyLarge,
+          color = MaterialTheme.colorScheme.onBackground,
+      )
+      Text(
+          text =
+              sim.phoneNumber?.takeIf { it.isNotBlank() }?.let { "Detected number: $it" }
+                  ?: "Number not reported by the carrier",
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onBackground,
+          modifier = Modifier.padding(bottom = 4.dp),
+      )
+
+      if (slotIndex >= 0) {
+        val overrideState =
+            rememberPreferenceTextState(simNumberOverrides[slotIndex] ?: "") {
+              PreferencesManager.updateSimNumberOverride(context, slotIndex, it)
+            }
+        OutlinedTextField(
+            value = overrideState.value,
+            onValueChange = { overrideState.value = it },
+            label = { Text("Number for SIM ${sim.slotNumber} (optional)") },
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+        )
+      } else {
+        Spacer(modifier = Modifier.height(8.dp))
+      }
+    }
+  }
+
+  Spacer(modifier = Modifier.height(8.dp))
 }
 
 @Composable
